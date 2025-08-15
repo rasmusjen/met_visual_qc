@@ -1,0 +1,38 @@
+site_id: "GL-ZaF"
+input_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/PRECIP/2025/ICOS-data"
+header_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/PRECIP/2025/ICOS-data"
+output_dir: "output"
+file_glob: "*.dat"
+
+filters:
+  level_code: null
+  file_code: null
+
+timestamp:
+  column: "TIMESTAMP"
+  raw_format: "%Y%m%d%H%M"
+  timezone: "UTC"
+
+ingest:
+  has_header_row: false
+  nan_values: ["-9999", "-9999.0", "NA", "NaN", ""]
+  coerce_numeric: true
+
+merge:
+  sort_by_timestamp: true
+  drop_duplicates: true
+  output_parquet: "merged.parquet"
+  output_csv: "merged.csv"
+
+plot:
+  resample: null
+  variables_include: []
+  output_html: "qc_overview.html"
+  include_missing_heatmap: true
+  include_file_coverage: true
+
+# Persisted date range for 2025 run
+range:
+  year: "2025"
+  from: null
+  to: null
