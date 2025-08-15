@@ -40,8 +40,9 @@ def _apply_mapping(df: pd.DataFrame, mapping: List[HeaderColumn]) -> pd.DataFram
 
 def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optional[date] = None, date_to: Optional[date] = None) -> pd.DataFrame:
     base = Path(cfg.input_dir)
-    files = sorted(base.glob(cfg.file_glob))
-    if cfg.filters.level_code or cfg.filters.file_code:
+    # Only consider files that match the raw filename pattern
+    files = sorted([p for p in base.glob(cfg.file_glob) if parse_raw_filename(p.name)])
+    if cfg.filters.level_code or cfg.filters.file_code or cfg.filters.logger_file:
         def keep(p: Path) -> bool:
             rid = parse_raw_filename(p.name)
             if not rid:
@@ -52,6 +53,11 @@ def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optiona
                 return False
             if cfg.filters.file_code and rid.file != cfg.filters.file_code:
                 return False
+            if cfg.filters.logger_file:
+                # logger_file expected like 'L05_F02'
+                lf = cfg.filters.logger_file.upper()
+                if f"{rid.level}_{rid.file}".upper() != lf:
+                    return False
             return True
         files = [p for p in files if keep(p)]
     # Apply date-range filter on filenames if provided

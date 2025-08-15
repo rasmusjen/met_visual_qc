@@ -7,6 +7,7 @@ file_glob: "*.dat"
 filters:
   level_code: null
   file_code: null
+  logger_file: null
 
 timestamp:
   column: "TIMESTAMP"

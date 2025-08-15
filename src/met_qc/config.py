@@ -40,6 +40,8 @@ class PlotCfg:
 class FiltersCfg:
     level_code: Optional[str] = None
     file_code: Optional[str] = None
+    # Combined logger identifier matching the filename suffix like "L05_F02"
+    logger_file: Optional[str] = None
 
 
 @dataclass
@@ -68,7 +70,11 @@ class QCConfig:
 
 
 def _as_filters(d: Dict[str, Any]) -> FiltersCfg:
-    return FiltersCfg(level_code=d.get("level_code"), file_code=d.get("file_code"))
+    return FiltersCfg(
+        level_code=d.get("level_code"),
+        file_code=d.get("file_code"),
+        logger_file=d.get("logger_file"),
+    )
 
 
 def _as_timestamp(d: Dict[str, Any]) -> TimestampCfg:
