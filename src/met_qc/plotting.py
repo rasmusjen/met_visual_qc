@@ -9,6 +9,86 @@ from .config import QCConfig
 from .filenames import parse_raw_filename
 
 
+def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], remove: bool = False):
+    """Apply min/max screening.
+
+    Args:
+        df: input DataFrame (must contain ts column)
+        ts: timestamp column name
+        limits: list of tuples (pattern, min, max) where pattern ending with '_' is treated as prefix
+        remove: if True, rows out of range are removed from returned DataFrame
+
+    Returns:
+        (filtered_df, out_of_range_report)
+    """
+    out_of_range_report = {}
+    if not limits or df.empty:
+        return df if remove else df.copy(), out_of_range_report
+
+    for var in [c for c in df.columns if c != ts]:
+        applicable = None
+        for pattern, mn, mx in limits:
+            if pattern.endswith("_"):
+                if var.upper().startswith(pattern.upper()):
+                    applicable = (mn, mx)
+                    break
+            else:
+                if var.upper() == pattern.upper():
+                    applicable = (mn, mx)
+                    break
+        if not applicable:
+            continue
+        mn, mx = applicable
+        if mn is None and mx is None:
+            continue
+        mask = pd.Series(False, index=df.index)
+        if mn is not None:
+            mask = mask | (df[var] < mn)
+        if mx is not None:
+            mask = mask | (df[var] > mx)
+        mask = mask.fillna(False)
+        idxs = list(df.index[mask])
+        if not idxs:
+            continue
+        intervals = []
+        start = prev = idxs[0]
+        for i in idxs[1:]:
+            if i == prev + 1:
+                prev = i
+                continue
+            intervals.append((start, prev))
+            start = prev = i
+        intervals.append((start, prev))
+        display = []
+        for a, b in intervals:
+            t0 = pd.to_datetime(df.loc[a, ts])
+            t1 = pd.to_datetime(df.loc[b, ts])
+            if a == b:
+                val = df.loc[a, var]
+                display.append({"type": "single", "time": t0.isoformat(), "value": float(val) if pd.notna(val) else None, "index": int(a)})
+            else:
+                display.append({"type": "range", "start": t0.isoformat(), "end": t1.isoformat(), "start_idx": int(a), "end_idx": int(b)})
+        out_of_range_report[var] = display
+
+    if remove and out_of_range_report:
+        mask_allowed = pd.Series(True, index=df.index)
+        for var, items in out_of_range_report.items():
+            for it in items:
+                if it["type"] == "single":
+                    idx = it.get("index")
+                    if idx in mask_allowed.index:
+                        mask_allowed.at[idx] = False
+                else:
+                    a = it.get("start_idx")
+                    b = it.get("end_idx")
+                    if a is None or b is None:
+                        continue
+                    mask_allowed.loc[a:b] = False
+        return df.loc[mask_allowed].reset_index(drop=True), out_of_range_report
+
+    return df.copy(), out_of_range_report
+
+
 def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[pd.DataFrame] = None) -> Path:
     """Build an interactive Plotly HTML QC dashboard.
 
@@ -55,12 +135,12 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     if nvars > 0:
         # raw block
         for v in vars_to_plot:
-            if v in df.columns:
+            if v in df_to_plot.columns:
+                # For raw and 30-min, P_ variables are lines; daily remains bars for sums
                 if _agg_kind(v) == "sum":
-                    # Precipitation-like variable -> bar
-                    fig.add_trace(go.Bar(x=df[ts], y=df[v], name=v, showlegend=False), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=df_to_plot[ts], y=df_to_plot[v], mode="lines", name=v, showlegend=False), row=current_row, col=1)
                 else:
-                    fig.add_trace(go.Scatter(x=df[ts], y=df[v], mode="lines", name=v, showlegend=False), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=df_to_plot[ts], y=df_to_plot[v], mode="lines", name=v, showlegend=False), row=current_row, col=1)
             current_row += 1
         # 30min block
         dfi = df.set_index(ts)
@@ -68,8 +148,9 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
             if v in df.columns:
                 agg = _agg_kind(v)
                 if agg == "sum":
+                    # For P_ series, resample sum but show as line for 30-min
                     s30 = dfi[v].resample("30min").sum(min_count=1)
-                    fig.add_trace(go.Bar(x=s30.index, y=s30.values, name=f"{v}-30m", showlegend=False), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=s30.index, y=s30.values, mode="lines", name=f"{v}-30m", showlegend=False), row=current_row, col=1)
                 else:
                     s30 = dfi[v].resample("30min").mean()
                     fig.add_trace(go.Scatter(x=s30.index, y=s30.values, mode="lines", name=f"{v}-30m", showlegend=False), row=current_row, col=1)
@@ -79,6 +160,7 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
             if v in df.columns:
                 agg = _agg_kind(v)
                 if agg == "sum":
+                    # daily sums shown as bars for precipitation-like vars
                     sD = dfi[v].resample("1D").sum(min_count=1)
                     fig.add_trace(go.Bar(x=sD.index, y=sD.values, name=f"{v}-1d", showlegend=False), row=current_row, col=1)
                 else:
@@ -152,80 +234,10 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
         except Exception:
             limits = []
 
-    # Screen raw data for out-of-range values using the limits
-    out_of_range_report: dict = {}
-    if limits and not df.empty:
-        # operate on the raw dataframe (not resampled)
-        for var in [c for c in df.columns if c != ts]:
-            # find applicable limit: first matching prefix or exact match
-            applicable = None
-            for pattern, mn, mx in limits:
-                if pattern.endswith("_"):
-                    # treat as prefix
-                    if var.upper().startswith(pattern.upper()):
-                        applicable = (mn, mx)
-                        break
-                else:
-                    if var.upper() == pattern.upper():
-                        applicable = (mn, mx)
-                        break
-            if not applicable:
-                continue
-            mn, mx = applicable
-            if mn is None and mx is None:
-                continue
-            mask = pd.Series(False, index=df.index)
-            if mn is not None:
-                mask = mask | (df[var] < mn)
-            if mx is not None:
-                mask = mask | (df[var] > mx)
-            mask = mask.fillna(False)
-            idxs = list(df.index[mask])
-            if not idxs:
-                continue
-            # group consecutive indices into intervals
-            intervals = []
-            start = prev = idxs[0]
-            for i in idxs[1:]:
-                if i == prev + 1:
-                    prev = i
-                    continue
-                # close interval
-                intervals.append((start, prev))
-                start = prev = i
-            intervals.append((start, prev))
-            # convert intervals to timestamp strings and sample values
-            display = []
-            for a, b in intervals:
-                t0 = pd.to_datetime(df.loc[a, ts])
-                t1 = pd.to_datetime(df.loc[b, ts])
-                if a == b:
-                    val = df.loc[a, var]
-                    display.append({"type": "single", "time": t0.isoformat(), "value": float(val) if pd.notna(val) else None})
-                else:
-                    display.append({"type": "range", "start": t0.isoformat(), "end": t1.isoformat()})
-            out_of_range_report[var] = display
-
-    # If plot_filter is enabled, remove out-of-range samples from the dataframe
-    if cfg.plot.plot_filter and out_of_range_report:
-        # build a mask of allowed rows
-        mask_allowed = pd.Series(True, index=df.index)
-        for var, items in out_of_range_report.items():
-            # mark indices in the original dataframe as False (remove)
-            for it in items:
-                if it["type"] == "single":
-                    # find index of timestamp
-                    idx = df.index[df[ts].astype(str) == it["time"]]
-                    for i in idx:
-                        mask_allowed.at[i] = False
-                else:
-                    # range: remove rows between start and end inclusive
-                    start = pd.to_datetime(it["start"]) 
-                    end = pd.to_datetime(it["end"]) 
-                    rng = (pd.to_datetime(df[ts]) >= start) & (pd.to_datetime(df[ts]) <= end)
-                    mask_allowed[rng.values] = False
-        # apply mask
-        df = df.loc[mask_allowed].reset_index(drop=True)
+    # Apply screening + optional removal via helper
+    df_filtered, out_of_range_report = apply_var_min_max(df, ts, limits, remove=bool(cfg.plot.plot_filter))
+    # Use df_filtered for plotting and resampling
+    df_to_plot = df_filtered.copy()
 
     # Render HTML and append out-of-range report under the figure
     raw_html = fig.to_html(full_html=True, include_plotlyjs="cdn")
