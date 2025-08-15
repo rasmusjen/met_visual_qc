@@ -5,7 +5,7 @@ output_dir: "output"
 file_glob: "*.dat"
 
 filters:
-  logger_file: null
+  logger_file: "L05_F02"
 
 timestamp:
   column: "TIMESTAMP"
