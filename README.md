@@ -37,6 +37,5 @@ python -m met_qc.cli all --config config\example_config.yaml
 ## Persisted date range (optional)
 
 - Set in `config/example_config.yaml` under `range:`
-	- `year: "2025"` or `from: "20250101"` / `to: "20250314"`
+  - `year: "2025"` or `from: "20250101"` / `to: "20250314"`
 - CLI flags `--year/--from/--to` override the YAML values when provided.
-
