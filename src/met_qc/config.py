@@ -34,6 +34,8 @@ class PlotCfg:
     output_html: str = "qc_overview.html"
     include_missing_heatmap: bool = True
     include_file_coverage: bool = True
+    # If True, remove out-of-range raw values (per var_min_max.csv) from plots and from resampling
+    plot_filter: bool = False
 
 
 @dataclass
@@ -101,6 +103,7 @@ def _as_plot(d: Dict[str, Any]) -> PlotCfg:
         output_html=str(d.get("output_html", "qc_overview.html")),
         include_missing_heatmap=bool(d.get("include_missing_heatmap", True)),
         include_file_coverage=bool(d.get("include_file_coverage", True)),
+    plot_filter=bool(d.get("plot_filter", False)),
     )
 
 
