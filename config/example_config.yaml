@@ -29,6 +29,7 @@ plot:
   output_html: "qc_overview.html"
   include_missing_heatmap: true
   include_file_coverage: true
+  plot_filter: false
 
 # Optional persisted date range (CLI flags override these)
 range:

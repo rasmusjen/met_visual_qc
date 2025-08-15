@@ -206,6 +206,27 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
                     display.append({"type": "range", "start": t0.isoformat(), "end": t1.isoformat()})
             out_of_range_report[var] = display
 
+    # If plot_filter is enabled, remove out-of-range samples from the dataframe
+    if cfg.plot.plot_filter and out_of_range_report:
+        # build a mask of allowed rows
+        mask_allowed = pd.Series(True, index=df.index)
+        for var, items in out_of_range_report.items():
+            # mark indices in the original dataframe as False (remove)
+            for it in items:
+                if it["type"] == "single":
+                    # find index of timestamp
+                    idx = df.index[df[ts].astype(str) == it["time"]]
+                    for i in idx:
+                        mask_allowed.at[i] = False
+                else:
+                    # range: remove rows between start and end inclusive
+                    start = pd.to_datetime(it["start"]) 
+                    end = pd.to_datetime(it["end"]) 
+                    rng = (pd.to_datetime(df[ts]) >= start) & (pd.to_datetime(df[ts]) <= end)
+                    mask_allowed[rng.values] = False
+        # apply mask
+        df = df.loc[mask_allowed].reset_index(drop=True)
+
     # Render HTML and append out-of-range report under the figure
     raw_html = fig.to_html(full_html=True, include_plotlyjs="cdn")
     out_html_snippet = ""
