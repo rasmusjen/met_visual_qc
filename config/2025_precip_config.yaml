@@ -1,6 +1,6 @@
 site_id: "GL-ZaF"
 input_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/PRECIP/2025/ICOS-data"
-header_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/PRECIP/2025/ICOS-data"
+header_dir: "config/headers"
 output_dir: "output"
 file_glob: "*.dat"
 
