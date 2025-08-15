@@ -101,6 +101,34 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     if cfg.plot.resample:
         df = df.set_index(ts).resample(cfg.plot.resample).mean(numeric_only=True).reset_index()
 
+    # Read variable-specific min/max limits from config/var_min_max.csv if present
+    limits_path = Path("config") / "var_min_max.csv"
+    limits = []
+    if limits_path.exists():
+        try:
+            vdf = pd.read_csv(limits_path)
+            # expect columns: Variable, Min, Max
+            for _, r in vdf.iterrows():
+                var = str(r.get("Variable") or "").strip()
+                try:
+                    mn = float(r.get("Min"))
+                except Exception:
+                    mn = None
+                try:
+                    mx = float(r.get("Max"))
+                except Exception:
+                    mx = None
+                if var:
+                    limits.append((var, mn, mx))
+        except Exception:
+            limits = []
+
+    # Apply screening + optional removal via helper so filtered data is used for plotting and resampling
+    df_filtered, out_of_range_report = apply_var_min_max(df, ts, limits, remove=bool(cfg.plot.plot_filter))
+    # Use filtered df both for plotting traces and for any further resampling/aggregation
+    df_to_plot = df_filtered.copy()
+    df = df_filtered
+
     # Build figure grouped by layer: all raw, then all 30min, then all daily
     nvars = len(vars_to_plot)
     var_rows = nvars * 3 if nvars > 0 else 0
@@ -212,32 +240,7 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     fig.update_layout(showlegend=False, title_text=title_text, title_x=0.5, margin=dict(t=110))
     fig.add_annotation(text=meta_text, xref="paper", yref="paper", x=0, y=1.08, showarrow=False, align="left", font=dict(size=12))
 
-    # Read variable-specific min/max limits from config/var_min_max.csv if present
-    limits_path = Path("config") / "var_min_max.csv"
-    limits = []
-    if limits_path.exists():
-        try:
-            vdf = pd.read_csv(limits_path)
-            # expect columns: Variable, Min, Max
-            for _, r in vdf.iterrows():
-                var = str(r.get("Variable") or "").strip()
-                try:
-                    mn = float(r.get("Min"))
-                except Exception:
-                    mn = None
-                try:
-                    mx = float(r.get("Max"))
-                except Exception:
-                    mx = None
-                if var:
-                    limits.append((var, mn, mx))
-        except Exception:
-            limits = []
-
-    # Apply screening + optional removal via helper
-    df_filtered, out_of_range_report = apply_var_min_max(df, ts, limits, remove=bool(cfg.plot.plot_filter))
-    # Use df_filtered for plotting and resampling
-    df_to_plot = df_filtered.copy()
+    # df_to_plot and out_of_range_report were prepared earlier
 
     # Render HTML and append out-of-range report under the figure
     raw_html = fig.to_html(full_html=True, include_plotlyjs="cdn")
@@ -255,10 +258,46 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
         lines.append("</ul>")
         out_html_snippet = "\n".join(lines)
 
-    if out_html_snippet:
+    # If data span more than a month, build a monthly + whole-period summary table per variable
+    monthly_html = ""
+    try:
+        if not df_to_plot.empty and vars_to_plot:
+            tmin = pd.to_datetime(df_to_plot[ts]).min()
+            tmax = pd.to_datetime(df_to_plot[ts]).max()
+            if (tmax - tmin).days >= 31:
+                d = df_to_plot.copy()
+                d[ts] = pd.to_datetime(d[ts])
+                d = d.set_index(ts)
+                # period range for months
+                period_index = pd.period_range(start=tmin, end=tmax, freq='M')
+                month_labels = [p.strftime('%Y-%m') for p in period_index]
+                rows = {}
+                grp = d.groupby(d.index.to_period('M'))
+                for v in vars_to_plot:
+                    agg = _agg_kind(v)
+                    if agg == 'sum':
+                        s = grp[v].sum(min_count=1)
+                        whole = d[v].sum(min_count=1)
+                    else:
+                        s = grp[v].mean()
+                        whole = d[v].mean()
+                    vals = [s.get(p, pd.NA) for p in period_index]
+                    # convert Period/NaN to floats where possible
+                    vals = [float(x) if pd.notna(x) else None for x in vals]
+                    whole_val = float(whole) if pd.notna(whole) else None
+                    rows[v] = vals + [whole_val]
+                cols = month_labels + ['Whole']
+                df_summary = pd.DataFrame.from_dict(rows, orient='index', columns=cols)
+                # simple formatting
+                monthly_html = '<h3>Monthly summary</h3>' + df_summary.to_html(float_format='%.3f', na_rep='')
+    except Exception:
+        monthly_html = ''
+
+    if out_html_snippet or monthly_html:
         # inject before closing </body>
+        inject = out_html_snippet + monthly_html
         if "</body>" in raw_html:
-            raw_html = raw_html.replace("</body>", out_html_snippet + "</body>")
+            raw_html = raw_html.replace("</body>", inject + "</body>")
 
     Path(out).write_text(raw_html, encoding="utf-8")
     return out
