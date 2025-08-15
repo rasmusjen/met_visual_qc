@@ -117,15 +117,14 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     out.parent.mkdir(parents=True, exist_ok=True)
     # Build header/title info
     site = cfg.site_id
-    lvl = cfg.filters.level_code or "All levels"
-    fcode = cfg.filters.file_code or "All files"
+    lf = cfg.filters.logger_file or "All loggers"
     if ts in df.columns and not df.empty:
         tmin = pd.to_datetime(df[ts]).min()
         tmax = pd.to_datetime(df[ts]).max()
         period = f"{tmin:%Y-%m-%d} → {tmax:%Y-%m-%d}"
     else:
         period = "(no data)"
-    title_text = f"{site} — {lvl} — {fcode}<br><span style='font-size:0.9em'>Period: {period}</span>"
+    title_text = f"{site} — {lf}<br><span style='font-size:0.9em'>Period: {period}</span>"
     # Add a compact meta annotation (vars/rows)
     meta_text = f"Vars: {nvars} · Rows: {len(df):,}"
     fig.update_layout(showlegend=False, title_text=title_text, title_x=0.5, margin=dict(t=110))

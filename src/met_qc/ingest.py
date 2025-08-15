@@ -42,22 +42,16 @@ def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optiona
     base = Path(cfg.input_dir)
     # Only consider files that match the raw filename pattern
     files = sorted([p for p in base.glob(cfg.file_glob) if parse_raw_filename(p.name)])
-    if cfg.filters.level_code or cfg.filters.file_code or cfg.filters.logger_file:
+    if cfg.filters.logger_file:
         def keep(p: Path) -> bool:
             rid = parse_raw_filename(p.name)
             if not rid:
                 return False
             if rid.site != cfg.site_id:
                 return False
-            if cfg.filters.level_code and rid.level != cfg.filters.level_code:
+            lf = cfg.filters.logger_file.upper()
+            if f"{rid.level}_{rid.file}".upper() != lf:
                 return False
-            if cfg.filters.file_code and rid.file != cfg.filters.file_code:
-                return False
-            if cfg.filters.logger_file:
-                # logger_file expected like 'L05_F02'
-                lf = cfg.filters.logger_file.upper()
-                if f"{rid.level}_{rid.file}".upper() != lf:
-                    return False
             return True
         files = [p for p in files if keep(p)]
     # Apply date-range filter on filenames if provided

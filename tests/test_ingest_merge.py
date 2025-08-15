@@ -16,8 +16,7 @@ header_dir: "examples"
 output_dir: "output"
 file_glob: "*.dat"
 filters:
-  level_code: "L05"
-  file_code: "F02"
+  logger_file: "L05_F02"
 timestamp:
   column: "TIMESTAMP"
   raw_format: "%Y%m%d%H%M"
