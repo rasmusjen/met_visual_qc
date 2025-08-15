@@ -129,7 +129,105 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     meta_text = f"Vars: {nvars} · Rows: {len(df):,}"
     fig.update_layout(showlegend=False, title_text=title_text, title_x=0.5, margin=dict(t=110))
     fig.add_annotation(text=meta_text, xref="paper", yref="paper", x=0, y=1.08, showarrow=False, align="left", font=dict(size=12))
-    fig.write_html(str(out), include_plotlyjs="cdn", full_html=True)
+
+    # Read variable-specific min/max limits from config/var_min_max.csv if present
+    limits_path = Path("config") / "var_min_max.csv"
+    limits = []
+    if limits_path.exists():
+        try:
+            vdf = pd.read_csv(limits_path)
+            # expect columns: Variable, Min, Max
+            for _, r in vdf.iterrows():
+                var = str(r.get("Variable") or "").strip()
+                try:
+                    mn = float(r.get("Min"))
+                except Exception:
+                    mn = None
+                try:
+                    mx = float(r.get("Max"))
+                except Exception:
+                    mx = None
+                if var:
+                    limits.append((var, mn, mx))
+        except Exception:
+            limits = []
+
+    # Screen raw data for out-of-range values using the limits
+    out_of_range_report: dict = {}
+    if limits and not df.empty:
+        # operate on the raw dataframe (not resampled)
+        for var in [c for c in df.columns if c != ts]:
+            # find applicable limit: first matching prefix or exact match
+            applicable = None
+            for pattern, mn, mx in limits:
+                if pattern.endswith("_"):
+                    # treat as prefix
+                    if var.upper().startswith(pattern.upper()):
+                        applicable = (mn, mx)
+                        break
+                else:
+                    if var.upper() == pattern.upper():
+                        applicable = (mn, mx)
+                        break
+            if not applicable:
+                continue
+            mn, mx = applicable
+            if mn is None and mx is None:
+                continue
+            mask = pd.Series(False, index=df.index)
+            if mn is not None:
+                mask = mask | (df[var] < mn)
+            if mx is not None:
+                mask = mask | (df[var] > mx)
+            mask = mask.fillna(False)
+            idxs = list(df.index[mask])
+            if not idxs:
+                continue
+            # group consecutive indices into intervals
+            intervals = []
+            start = prev = idxs[0]
+            for i in idxs[1:]:
+                if i == prev + 1:
+                    prev = i
+                    continue
+                # close interval
+                intervals.append((start, prev))
+                start = prev = i
+            intervals.append((start, prev))
+            # convert intervals to timestamp strings and sample values
+            display = []
+            for a, b in intervals:
+                t0 = pd.to_datetime(df.loc[a, ts])
+                t1 = pd.to_datetime(df.loc[b, ts])
+                if a == b:
+                    val = df.loc[a, var]
+                    display.append({"type": "single", "time": t0.isoformat(), "value": float(val) if pd.notna(val) else None})
+                else:
+                    display.append({"type": "range", "start": t0.isoformat(), "end": t1.isoformat()})
+            out_of_range_report[var] = display
+
+    # Render HTML and append out-of-range report under the figure
+    raw_html = fig.to_html(full_html=True, include_plotlyjs="cdn")
+    out_html_snippet = ""
+    if out_of_range_report:
+        lines = ["<h3>Out-of-range values</h3>", "<ul>"]
+        for var, items in out_of_range_report.items():
+            lines.append(f"<li><strong>{var}</strong><ul>")
+            for it in items:
+                if it["type"] == "single":
+                    lines.append(f"<li>{it['time']}: {it['value']}</li>")
+                else:
+                    lines.append(f"<li>{it['start']} → {it['end']}</li>")
+            lines.append("</ul></li>")
+        lines.append("</ul>")
+        out_html_snippet = "\n".join(lines)
+
+    if out_html_snippet:
+        # inject before closing </body>
+        if "</body>" in raw_html:
+            raw_html = raw_html.replace("</body>", out_html_snippet + "</body>")
+
+    Path(out).write_text(raw_html, encoding="utf-8")
     return out
 
 
@@ -147,10 +245,10 @@ def _compute_file_coverage(cfg: QCConfig) -> pd.DataFrame:
             continue
         if rid.site != cfg.site_id:
             continue
-        if cfg.filters.level_code and rid.level != cfg.filters.level_code:
-            continue
-        if cfg.filters.file_code and rid.file != cfg.filters.file_code:
-            continue
+        if cfg.filters.logger_file:
+            lf = cfg.filters.logger_file.upper()
+            if f"{rid.level}_{rid.file}".upper() != lf:
+                continue
         key = f"{rid.level}_{rid.file}"
         rows.append({"date": pd.Timestamp(rid.date), "key": key, "value": 1})
     if not rows:
