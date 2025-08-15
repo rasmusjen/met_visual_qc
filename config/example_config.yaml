@@ -1,0 +1,38 @@
+site_id: "GL-ZaF"
+input_dir: "examples"
+header_dir: "examples"
+output_dir: "output"
+file_glob: "*.dat"
+
+filters:
+  level_code: "L05"
+  file_code: "F02"
+
+timestamp:
+  column: "TIMESTAMP"
+  raw_format: "%Y%m%d%H%M"
+  timezone: "UTC"
+
+ingest:
+  has_header_row: false
+  nan_values: ["-9999", "-9999.0", "NA", "NaN", ""]
+  coerce_numeric: true
+
+merge:
+  sort_by_timestamp: true
+  drop_duplicates: true
+  output_parquet: "merged.parquet"
+  output_csv: "merged.csv"
+
+plot:
+  resample: null
+  variables_include: []
+  output_html: "qc_overview.html"
+  include_missing_heatmap: true
+  include_file_coverage: true
+
+# Optional persisted date range (CLI flags override these)
+range:
+  year: null        # e.g., "2025"
+  from: null        # e.g., "20250101"
+  to: null          # e.g., "20250314"

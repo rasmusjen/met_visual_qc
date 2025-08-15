@@ -1,0 +1,3 @@
+[console_scripts]
+met-qc = met_qc.cli:main
+met-visual-qc = met_visual_qc.cli:main
