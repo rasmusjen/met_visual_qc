@@ -89,17 +89,13 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], remove: bo
     return df.copy(), out_of_range_report
 
 
-def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[pd.DataFrame] = None) -> Path:
-    """Build an interactive Plotly HTML QC dashboard.
+def build_qc_dashboards(cfg: QCConfig, df: pd.DataFrame) -> List[Path]:
+    """Build interactive Plotly HTML QC dashboards for raw, 30min, and daily data.
 
-    Returns path to saved HTML.
+    Returns list of paths to saved HTML files.
     """
     ts = cfg.timestamp.column
     vars_to_plot: List[str] = cfg.plot.variables_include or [c for c in df.columns if c != ts]
-
-    # Optionally resample
-    if cfg.plot.resample:
-        df = df.set_index(ts).resample(cfg.plot.resample).mean(numeric_only=True).reset_index()
 
     # Read variable-specific min/max limits from config/var_min_max.csv if present
     limits_path = Path("config") / "var_min_max.csv"
@@ -126,105 +122,104 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     # Apply screening + optional removal via helper so filtered data is used for plotting and resampling
     df_filtered, out_of_range_report = apply_var_min_max(df, ts, limits, remove=bool(cfg.plot.plot_filter))
     # Use filtered df both for plotting traces and for any further resampling/aggregation
-    df_to_plot = df_filtered.copy()
     df = df_filtered
 
-    # Build figure grouped by layer: all raw, then all 30min, then all daily
-    nvars = len(vars_to_plot)
-    var_rows = nvars * 3 if nvars > 0 else 0
-    rows = var_rows if var_rows > 0 else 1  # ensure at least one row exists
-    if cfg.plot.include_missing_heatmap:
-        rows += 1
-    # compute file coverage if requested and not provided
-    if cfg.plot.include_file_coverage and (file_coverage is None or file_coverage.empty):
+    # Compute file coverage if requested
+    file_coverage = None
+    if cfg.plot.include_file_coverage:
         file_coverage = _compute_file_coverage(cfg)
 
-    if cfg.plot.include_file_coverage and file_coverage is not None and not file_coverage.empty:
-        rows += 1
+    paths = []
 
-    titles: List[str] = []
-    if nvars > 0:
-        # raw block titles
-        titles.extend([f"{v} (raw)" for v in vars_to_plot])
-        # 30min block titles
-        titles.extend([f"{v} (30min {_agg_kind(v)})" for v in vars_to_plot])
-        # daily block titles
-        titles.extend([f"{v} (daily {_agg_kind(v)})" for v in vars_to_plot])
-    else:
-        titles = ["Time Series"]
+    # Raw data dashboard
+    if cfg.plot.output_files.get("qc_raw.html", True):
+        paths.append(_build_single_dashboard(cfg, df, vars_to_plot, "raw", file_coverage, out_of_range_report))
+
+    # 30min aggregated dashboard
+    if cfg.plot.output_files.get("qc_30min.html", True):
+        df_30min = _resample_df(df, ts, "30min", vars_to_plot)
+        paths.append(_build_single_dashboard(cfg, df_30min, vars_to_plot, "30min", file_coverage, out_of_range_report))
+
+    # Daily aggregated dashboard
+    if cfg.plot.output_files.get("qc_daily.html", True):
+        df_daily = _resample_df(df, ts, "1D", vars_to_plot)
+        paths.append(_build_single_dashboard(cfg, df_daily, vars_to_plot, "daily", file_coverage, out_of_range_report))
+
+    return paths
+
+
+def _resample_df(df: pd.DataFrame, ts: str, freq: str, vars_to_plot: List[str]) -> pd.DataFrame:
+    """Resample dataframe to given frequency for the specified variables."""
+    dfi = df.set_index(ts)
+    resampled = {}
+    for v in vars_to_plot:
+        if v in df.columns:
+            agg = _agg_kind(v)
+            if agg == "sum":
+                resampled[v] = dfi[v].resample(freq).sum(min_count=1)
+            else:
+                resampled[v] = dfi[v].resample(freq).mean()
+    rdf = pd.DataFrame(resampled)
+    rdf[ts] = rdf.index
+    rdf = rdf.reset_index(drop=True)
+    return rdf
+
+
+def _build_single_dashboard(cfg: QCConfig, df: pd.DataFrame, vars_to_plot: List[str], level: str, file_coverage: Optional[pd.DataFrame], out_of_range_report: dict) -> Path:
+    """Build a single dashboard for the given level (raw, 30min, daily)."""
+    ts = cfg.timestamp.column
+    nvars = len(vars_to_plot)
+    rows = nvars
+    titles = [f"{v} ({level})" for v in vars_to_plot]
     if cfg.plot.include_missing_heatmap:
+        rows += 1
         titles.append("Missing Data")
     if cfg.plot.include_file_coverage and file_coverage is not None and not file_coverage.empty:
+        rows += 1
         titles.append("File Coverage")
-    fig = sp.make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.04, subplot_titles=titles)
 
-    # Time series traces grouped by layer (no legend)
+    vertical_spacing = 0.005  # small spacing for scrollable layout
+    fig = sp.make_subplots(
+        rows=rows, 
+        cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=vertical_spacing, 
+        subplot_titles=titles,
+        row_heights=[1] * rows  # equal heights
+    )
+
     current_row = 1
-    if nvars > 0:
-        # raw block
-        for v in vars_to_plot:
-            if v in df_to_plot.columns:
-                # For raw and 30-min, P_ variables are lines; daily remains bars for sums
-                if _agg_kind(v) == "sum":
-                    fig.add_trace(go.Scatter(x=df_to_plot[ts], y=df_to_plot[v], mode="lines", name=v, showlegend=False), row=current_row, col=1)
-                else:
-                    fig.add_trace(go.Scatter(x=df_to_plot[ts], y=df_to_plot[v], mode="lines", name=v, showlegend=False), row=current_row, col=1)
-            current_row += 1
-        # 30min block
-        dfi = df.set_index(ts)
-        for v in vars_to_plot:
-            if v in df.columns:
-                agg = _agg_kind(v)
-                if agg == "sum":
-                    # For P_ series, resample sum but show as line for 30-min
-                    s30 = dfi[v].resample("30min").sum(min_count=1)
-                    fig.add_trace(go.Scatter(x=s30.index, y=s30.values, mode="lines", name=f"{v}-30m", showlegend=False), row=current_row, col=1)
-                else:
-                    s30 = dfi[v].resample("30min").mean()
-                    fig.add_trace(go.Scatter(x=s30.index, y=s30.values, mode="lines", name=f"{v}-30m", showlegend=False), row=current_row, col=1)
-            current_row += 1
-        # daily block
-        for v in vars_to_plot:
-            if v in df.columns:
-                agg = _agg_kind(v)
-                if agg == "sum":
-                    # daily sums shown as bars for precipitation-like vars
-                    sD = dfi[v].resample("1D").sum(min_count=1)
-                    fig.add_trace(go.Bar(x=sD.index, y=sD.values, name=f"{v}-1d", showlegend=False), row=current_row, col=1)
-                else:
-                    sD = dfi[v].resample("1D").mean()
-                    fig.add_trace(go.Scatter(x=sD.index, y=sD.values, mode="lines", name=f"{v}-1d", showlegend=False), row=current_row, col=1)
-            current_row += 1
+    for v in vars_to_plot:
+        if v in df.columns:
+            if _agg_kind(v) == "sum" and level == "daily":
+                fig.add_trace(go.Bar(x=df[ts], y=df[v], name=v, showlegend=False), row=current_row, col=1)
+            else:
+                fig.add_trace(go.Scatter(x=df[ts], y=df[v], mode="lines", name=v, showlegend=False), row=current_row, col=1)
+        current_row += 1
 
-    # Next available row after the variable blocks
-    row_idx = current_row if nvars > 0 else 2
-    # Missing data heatmap
     if cfg.plot.include_missing_heatmap:
-        miss = df.copy()
-        if vars_to_plot:
-            miss["missing"] = miss[vars_to_plot].isna().sum(axis=1)
-        else:
-            miss["missing"] = miss[ts].isna().astype(int)
-        fig.add_trace(go.Heatmap(x=miss[ts], y=["missing"] * len(miss), z=miss["missing"], colorscale="Reds"), row=row_idx, col=1)
-        row_idx += 1
+        missing_data = df[vars_to_plot].isnull().astype(int)
+        fig.add_trace(go.Heatmap(
+            z=missing_data.T.values,
+            x=df[ts],
+            y=vars_to_plot,
+            colorscale="Greys",
+            showscale=False,
+            hoverongaps=False
+        ), row=current_row, col=1)
+        current_row += 1
 
-    # File coverage chart (stacked per day, keyed by file id e.g., L05_F02)
-    if cfg.plot.include_file_coverage and file_coverage is not None and not file_coverage.empty and row_idx <= rows:
-        cov = file_coverage.copy()
-        # Expect columns: date (date or datetime), key (str), value (int)
-        if "key" not in cov.columns:
-            # fallback if user provided simple rows/day format
-            cov = cov.rename(columns={"rows": "value"})
-            cov["key"] = "all"
-        cov["date"] = pd.to_datetime(cov["date"]).dt.normalize()
-        wide = cov.pivot_table(index="date", columns="key", values="value", aggfunc="sum", fill_value=0)
-        wide = wide.sort_index()
-        for k in wide.columns:
-            fig.add_trace(go.Bar(x=wide.index, y=wide[k], name=str(k), showlegend=False), row=row_idx, col=1)
-        fig.update_layout(barmode="stack", showlegend=False)
+    if cfg.plot.include_file_coverage and file_coverage is not None and not file_coverage.empty:
+        file_coverage_pivot = file_coverage.pivot(index="date", columns="key", values="value").fillna(0)
+        for col in file_coverage_pivot.columns:
+            fig.add_trace(go.Bar(
+                x=file_coverage_pivot.index,
+                y=file_coverage_pivot[col],
+                name=col,
+                showlegend=False
+            ), row=current_row, col=1)
+        fig.update_layout(barmode="stack")
 
-    out = Path(cfg.output_dir) / cfg.plot.output_html
-    out.parent.mkdir(parents=True, exist_ok=True)
     # Build header/title info
     site = cfg.site_id
     lf = cfg.filters.logger_file or "All loggers"
@@ -237,10 +232,16 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     title_text = f"{site} — {lf}<br><span style='font-size:0.9em'>Period: {period}</span>"
     # Add a compact meta annotation (vars/rows)
     meta_text = f"Vars: {nvars} · Rows: {len(df):,}"
-    fig.update_layout(showlegend=False, title_text=title_text, title_x=0.5, margin=dict(t=110))
+    fixed_subplot_height = 300  # pixels per subplot
+    total_height = rows * fixed_subplot_height + 150  # extra for title and margins
+    fig.update_layout(
+        showlegend=False, 
+        title_text=title_text, 
+        title_x=0.5, 
+        margin=dict(t=110),
+        height=total_height
+    )
     fig.add_annotation(text=meta_text, xref="paper", yref="paper", x=0, y=1.08, showarrow=False, align="left", font=dict(size=12))
-
-    # df_to_plot and out_of_range_report were prepared earlier
 
     # Render HTML and append out-of-range report under the figure
     raw_html = fig.to_html(full_html=True, include_plotlyjs="cdn")
@@ -261,11 +262,11 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
     # If data span more than a month, build a monthly + whole-period summary table per variable
     monthly_html = ""
     try:
-        if not df_to_plot.empty and vars_to_plot:
-            tmin = pd.to_datetime(df_to_plot[ts]).min()
-            tmax = pd.to_datetime(df_to_plot[ts]).max()
+        if not df.empty and vars_to_plot:
+            tmin = pd.to_datetime(df[ts]).min()
+            tmax = pd.to_datetime(df[ts]).max()
             if (tmax - tmin).days >= 31:
-                d = df_to_plot.copy()
+                d = df.copy()
                 d[ts] = pd.to_datetime(d[ts])
                 d = d.set_index(ts)
                 # period range for months
@@ -299,8 +300,9 @@ def build_qc_dashboard(cfg: QCConfig, df: pd.DataFrame, file_coverage: Optional[
         if "</body>" in raw_html:
             raw_html = raw_html.replace("</body>", inject + "</body>")
 
-    Path(out).write_text(raw_html, encoding="utf-8")
-    return out
+    output_path = Path(cfg.output_dir) / f"qc_{level}.html"
+    Path(output_path).write_text(raw_html, encoding="utf-8")
+    return output_path
 
 
 def _compute_file_coverage(cfg: QCConfig) -> pd.DataFrame:

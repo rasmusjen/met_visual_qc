@@ -31,11 +31,13 @@ class MergeCfg:
 class PlotCfg:
     resample: Optional[str] = None
     variables_include: List[str] = field(default_factory=list)
-    output_html: str = "qc_overview.html"
+    output_html: str = "qc_overview.html"  # kept for compatibility, but now using separate files
     include_missing_heatmap: bool = True
     include_file_coverage: bool = True
     # If True, remove out-of-range raw values (per var_min_max.csv) from plots and from resampling
     plot_filter: bool = False
+    # Options to enable/disable each output level
+    output_files: Dict[str, bool] = field(default_factory=lambda: {"qc_raw.html": True, "qc_30min.html": True, "qc_daily.html": True})
 
 
 @dataclass
@@ -103,7 +105,8 @@ def _as_plot(d: Dict[str, Any]) -> PlotCfg:
         output_html=str(d.get("output_html", "qc_overview.html")),
         include_missing_heatmap=bool(d.get("include_missing_heatmap", True)),
         include_file_coverage=bool(d.get("include_file_coverage", True)),
-    plot_filter=bool(d.get("plot_filter", False)),
+        plot_filter=bool(d.get("plot_filter", False)),
+        output_files=dict(d.get("output_files", {"qc_raw.html": True, "qc_30min.html": True, "qc_daily.html": True})),
     )
 
 

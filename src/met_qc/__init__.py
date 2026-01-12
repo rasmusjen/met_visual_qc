@@ -6,7 +6,7 @@ from .config import QCConfig, load_config
 from .filenames import parse_raw_filename, parse_header_filename, RawFileId, HeaderFileId
 from .headers import HeaderTimeline, HeaderColumn, build_header_timeline
 from .ingest import ingest_and_merge
-from .plotting import build_qc_dashboard
+from .plotting import build_qc_dashboards
 
 __all__ = [
     "QCConfig",
@@ -19,5 +19,5 @@ __all__ = [
     "HeaderColumn",
     "build_header_timeline",
     "ingest_and_merge",
-    "build_qc_dashboard",
+    "build_qc_dashboards",
 ]
