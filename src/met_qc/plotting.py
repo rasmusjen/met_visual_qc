@@ -9,13 +9,14 @@ from .config import QCConfig
 from .filenames import parse_raw_filename
 
 
-def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], remove: bool = False):
+def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], vars_to_plot: List[str], remove: bool = False):
     """Apply min/max screening.
 
     Args:
         df: input DataFrame (must contain ts column)
         ts: timestamp column name
         limits: list of tuples (pattern, min, max) where pattern ending with '_' is treated as prefix
+        vars_to_plot: list of variables to consider for filtering
         remove: if True, rows out of range are removed from returned DataFrame
 
     Returns:
@@ -25,7 +26,7 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], remove: bo
     if not limits or df.empty:
         return df if remove else df.copy(), out_of_range_report
 
-    for var in [c for c in df.columns if c != ts]:
+    for var in vars_to_plot:
         applicable = None
         for pattern, mn, mx in limits:
             if pattern.endswith("_"):
@@ -95,7 +96,7 @@ def build_qc_dashboards(cfg: QCConfig, df: pd.DataFrame) -> List[Path]:
     Returns list of paths to saved HTML files.
     """
     ts = cfg.timestamp.column
-    vars_to_plot: List[str] = cfg.plot.variables_include or [c for c in df.columns if c != ts]
+    vars_to_plot: List[str] = cfg.plot.variables_include or [c for c in df.columns if c != ts and "_IU_" not in c]
 
     # Read variable-specific min/max limits from config/var_min_max.csv if present
     limits_path = Path("config") / "var_min_max.csv"
@@ -120,7 +121,7 @@ def build_qc_dashboards(cfg: QCConfig, df: pd.DataFrame) -> List[Path]:
             limits = []
 
     # Apply screening + optional removal via helper so filtered data is used for plotting and resampling
-    df_filtered, out_of_range_report = apply_var_min_max(df, ts, limits, remove=bool(cfg.plot.plot_filter))
+    df_filtered, out_of_range_report = apply_var_min_max(df, ts, limits, vars_to_plot, remove=bool(cfg.plot.plot_filter))
     # Use filtered df both for plotting traces and for any further resampling/aggregation
     df = df_filtered
 

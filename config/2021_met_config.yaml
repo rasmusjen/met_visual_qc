@@ -1,11 +1,11 @@
 site_id: "GL-ZaF"
-input_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/METEO/2025"
-header_dir: "config/headers"
+input_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/METEO/2021"
+header_dir: "config/headers/GL-ZaF_BMHEADER_202101010000_L04_F01.csv"
 output_dir: "output"
 file_glob: "*.dat"
 
 filters:
-  logger_file: "L04_F02"
+  logger_file: "L04_F01"
 
 timestamp:
   column: "TIMESTAMP"
@@ -36,8 +36,8 @@ plot:
     qc_30min.html: true
     qc_daily.html: true
 
-# Persisted date range for 2025 run
+# Persisted date range for 2021 run
 range:
-  year: "2025"
+  year: "2021"
   from: null
   to: null

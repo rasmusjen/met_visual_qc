@@ -25,6 +25,7 @@ class MergeCfg:
     drop_duplicates: bool = True
     output_parquet: str = "merged.parquet"
     output_csv: Optional[str] = None
+    output_30min_csv: Optional[str] = None
 
 
 @dataclass
@@ -95,6 +96,7 @@ def _as_merge(d: Dict[str, Any]) -> MergeCfg:
         drop_duplicates=bool(d.get("drop_duplicates", True)),
         output_parquet=str(d.get("output_parquet", "merged.parquet")),
         output_csv=d.get("output_csv"),
+        output_30min_csv=d.get("output_30min_csv"),
     )
 
 
@@ -121,7 +123,13 @@ def _as_range(d: Dict[str, Any]) -> RangeCfg:
 
 def load_config(path: str | Path) -> QCConfig:
     p = Path(path)
-    data = yaml.safe_load(p.read_text())
+    try:
+        text = p.read_text(encoding='utf-8-sig')
+        data = yaml.safe_load(text)
+    except Exception as e:
+        raise ValueError(f"Failed to load YAML from {p}: {e}")
+    if data is None or not isinstance(data, dict):
+        raise ValueError(f"Invalid or empty YAML configuration in {p}")
     return QCConfig(
         site_id=str(data["site_id"]),
         input_dir=str(data["input_dir"]),

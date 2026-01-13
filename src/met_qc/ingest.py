@@ -47,7 +47,8 @@ def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optiona
             rid = parse_raw_filename(p.name)
             if not rid:
                 return False
-            if rid.site != cfg.site_id:
+            site_key = ''.join(c for c in cfg.site_id.upper() if c.isalnum())
+            if rid.site != site_key:
                 return False
             lf = cfg.filters.logger_file.upper()
             if f"{rid.level}_{rid.file}".upper() != lf:
@@ -74,7 +75,11 @@ def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optiona
         if not mapping:
             logger.warning(f"No header for file {p.name}; skipping")
             continue
-        df = pd.read_csv(p, header=None, names=None if cfg.ingest.has_header_row else None, na_values=na_vals)
+        try:
+            df = pd.read_csv(p, header=None, names=None if cfg.ingest.has_header_row else None, na_values=na_vals)
+        except pd.errors.ParserError as e:
+            logger.warning(f"Failed to parse file {p.name}: {e}; skipping")
+            continue
         try:
             df = _apply_mapping(df, mapping)
         except Exception as e:
@@ -103,4 +108,12 @@ def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optiona
     merged.to_parquet(str(cfg.output_path() / cfg.merge.output_parquet), index=False)
     if cfg.merge.output_csv:
         merged.to_csv(str(cfg.output_path() / cfg.merge.output_csv), index=False)
+    if cfg.merge.output_30min_csv:
+        logger.info(f"Creating 30min CSV: {cfg.merge.output_30min_csv}")
+        try:
+            merged_30min = merged.set_index(cfg.timestamp.column).resample('30min').mean().reset_index()
+            logger.info(f"Saving 30min CSV with shape {merged_30min.shape}")
+            merged_30min.to_csv(str(cfg.output_path() / cfg.merge.output_30min_csv), index=False)
+        except Exception as e:
+            logger.warning(f"Failed to create 30min CSV: {e}")
     return merged

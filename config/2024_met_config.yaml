@@ -1,5 +1,5 @@
 site_id: "GL-ZaF"
-input_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/METEO/2025"
+input_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/METEO/2024"
 header_dir: "config/headers"
 output_dir: "output"
 file_glob: "*.dat"
@@ -36,8 +36,8 @@ plot:
     qc_30min.html: true
     qc_daily.html: true
 
-# Persisted date range for 2025 run
+# Persisted date range for 2024 run
 range:
-  year: "2025"
+  year: "2024"
   from: null
   to: null
