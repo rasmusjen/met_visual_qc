@@ -7,7 +7,7 @@ import pandas as pd
 from .config import load_config
 from .headers import build_header_timeline
 from .ingest import ingest_and_merge
-from .plotting import build_qc_dashboard
+from .plotting import build_qc_dashboards
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
@@ -102,8 +102,9 @@ def all(config_path: str, year: str | None, from_: str | None, to: str | None) -
     if t:
         dto = _parse_date_token(t)[1]
     df = ingest_and_merge(cfg, tl, date_from=dfrom, date_to=dto)
-    build_qc_dashboard(cfg, df)
-    click.echo(f"All done -> {cfg.output_dir}")
+    paths = build_qc_dashboards(cfg, df)
+    for p in paths:
+        click.echo(f"Generated: {p}")
 
 
 def main() -> None:

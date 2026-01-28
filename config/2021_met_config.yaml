@@ -1,15 +1,15 @@
 site_id: "GL-ZaF"
-input_dir: "examples"
-header_dir: "examples"
+input_dir: "O:/Tech_ICOS/DATA/GL-ZaF/1.raw/METEO/2021"
+header_dir: "config/headers/GL-ZaF_BMHEADER_202101010000_L04_F01.csv"
 output_dir: "output"
 file_glob: "*.dat"
 
 filters:
-  logger_file: "L05_F02"
+  logger_file: "L04_F01"
 
 timestamp:
   column: "TIMESTAMP"
-  raw_format: "%Y%m%d%H%M"
+  raw_format: "%Y%m%d%H%M%S"
   timezone: "UTC"
 
 ingest:
@@ -22,6 +22,7 @@ merge:
   drop_duplicates: true
   output_parquet: "merged.parquet"
   output_csv: "merged.csv"
+  output_30min_csv: "merged_30min.csv"
 
 plot:
   resample: null
@@ -29,14 +30,14 @@ plot:
   output_html: "qc_overview.html"
   include_missing_heatmap: true
   include_file_coverage: true
-  plot_filter: false
+  plot_filter: true
   output_files:
-    qc_raw.html: true
+    qc_raw.html: false
     qc_30min.html: true
     qc_daily.html: true
 
-# Optional persisted date range (CLI flags override these)
+# Persisted date range for 2021 run
 range:
-  year: null        # e.g., "2025"
-  from: null        # e.g., "20250101"
-  to: null          # e.g., "20250314"
+  year: "2021"
+  from: null
+  to: null

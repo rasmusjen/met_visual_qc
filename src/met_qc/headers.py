@@ -27,7 +27,7 @@ class HeaderTimeline:
     intervals: Dict[Tuple[str, str, str], List[Tuple[datetime, List[HeaderColumn]]]]
 
     def resolve(self, site: str, level: str, file: str, dt: datetime) -> Optional[List[HeaderColumn]]:
-        key = (site, level, file)
+        key = (site.upper(), level, file)
         if key not in self.intervals:
             return None
         arr = self.intervals[key]
@@ -70,7 +70,7 @@ def _normalize_header_csv(path: Path) -> List[HeaderColumn]:
         # Peek second row to see if there is data; reopen and use DictReader
         with path.open("r", newline="", encoding="utf-8") as fpeek:
             lines = fpeek.read().splitlines()
-        if len(lines) == 1:
+        if len(lines) == 1 or (len(lines) == 2 and lines[1].strip() == ''):
             # Single-line file: treat as names only
             names = [s.strip().strip('"') for s in raw_first_row]
             cols = [HeaderColumn(column_index=i, name=nm) for i, nm in enumerate(names)]
@@ -119,9 +119,14 @@ def build_header_timeline(header_dir: str) -> HeaderTimeline:
         hid = parse_header_filename(p.name)
         if not hid:
             continue
-        cols = _normalize_header_csv(p)
-        key = (hid.site, hid.level, hid.file)
-        intervals.setdefault(key, []).append((hid.valid_from, cols))
+        try:
+            cols = _normalize_header_csv(p)
+        except Exception as e:
+            logger.warning(f"Failed to parse header {p.name}: {e}")
+            continue
+        key = (hid.site.upper(), hid.level, hid.file)
+        start = hid.valid_from.replace(hour=0, minute=0, second=0, microsecond=0)
+        intervals.setdefault(key, []).append((start, cols))
     # Sort intervals per key
     for key in list(intervals.keys()):
         intervals[key].sort(key=lambda t: t[0])

@@ -25,17 +25,20 @@ class MergeCfg:
     drop_duplicates: bool = True
     output_parquet: str = "merged.parquet"
     output_csv: Optional[str] = None
+    output_30min_csv: Optional[str] = None
 
 
 @dataclass
 class PlotCfg:
     resample: Optional[str] = None
     variables_include: List[str] = field(default_factory=list)
-    output_html: str = "qc_overview.html"
+    output_html: str = "qc_overview.html"  # kept for compatibility, but now using separate files
     include_missing_heatmap: bool = True
     include_file_coverage: bool = True
     # If True, remove out-of-range raw values (per var_min_max.csv) from plots and from resampling
     plot_filter: bool = False
+    # Options to enable/disable each output level
+    output_files: Dict[str, bool] = field(default_factory=lambda: {"qc_raw.html": True, "qc_30min.html": True, "qc_daily.html": True})
 
 
 @dataclass
@@ -93,6 +96,7 @@ def _as_merge(d: Dict[str, Any]) -> MergeCfg:
         drop_duplicates=bool(d.get("drop_duplicates", True)),
         output_parquet=str(d.get("output_parquet", "merged.parquet")),
         output_csv=d.get("output_csv"),
+        output_30min_csv=d.get("output_30min_csv"),
     )
 
 
@@ -103,7 +107,8 @@ def _as_plot(d: Dict[str, Any]) -> PlotCfg:
         output_html=str(d.get("output_html", "qc_overview.html")),
         include_missing_heatmap=bool(d.get("include_missing_heatmap", True)),
         include_file_coverage=bool(d.get("include_file_coverage", True)),
-    plot_filter=bool(d.get("plot_filter", False)),
+        plot_filter=bool(d.get("plot_filter", False)),
+        output_files=dict(d.get("output_files", {"qc_raw.html": True, "qc_30min.html": True, "qc_daily.html": True})),
     )
 
 
@@ -118,7 +123,13 @@ def _as_range(d: Dict[str, Any]) -> RangeCfg:
 
 def load_config(path: str | Path) -> QCConfig:
     p = Path(path)
-    data = yaml.safe_load(p.read_text())
+    try:
+        text = p.read_text(encoding='utf-8-sig')
+        data = yaml.safe_load(text)
+    except Exception as e:
+        raise ValueError(f"Failed to load YAML from {p}: {e}")
+    if data is None or not isinstance(data, dict):
+        raise ValueError(f"Invalid or empty YAML configuration in {p}")
     return QCConfig(
         site_id=str(data["site_id"]),
         input_dir=str(data["input_dir"]),
