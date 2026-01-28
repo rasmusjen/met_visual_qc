@@ -13,7 +13,7 @@ def test_apply_var_min_max_remove():
     df = pd.DataFrame(data)
     limits = [('P_', 0.0, 10.0)]
     # Remove out of range
-    df_filtered, report = apply_var_min_max(df, 'TIMESTAMP', limits, remove=True)
+    df_filtered, report = apply_var_min_max(df, 'TIMESTAMP', limits, ['P_RAIN'], remove=True)
     # Expect rows with values 12.0 and 15.0 removed
     assert len(df_filtered) == 4
     assert 'P_RAIN' in report
