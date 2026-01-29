@@ -24,9 +24,17 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], vars_to_pl
     """
     out_of_range_report = {}
     if not limits or df.empty:
-        return df if remove else df.copy(), out_of_range_report
+        return df.copy() if remove else df.copy(), out_of_range_report
+    
+    # Make a copy to avoid modifying the input dataframe (pandas CoW compatibility)
+    df = df.copy()
+
+    # Skip internal-use variables from min/max screening
+    skip_prefixes = ("G_SF_", "G_ISCAL_", "G_IU_", "D_SNOW_IU_")
 
     for var in vars_to_plot:
+        if var.startswith(skip_prefixes):
+            continue
         applicable = None
         for pattern, mn, mx in limits:
             if pattern.endswith("_"):
@@ -42,11 +50,13 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], vars_to_pl
         mn, mx = applicable
         if mn is None and mx is None:
             continue
+        # Coerce to numeric for comparisons; non-numeric become NaN and won't trigger
+        series = pd.to_numeric(df[var], errors="coerce")
         mask = pd.Series(False, index=df.index)
         if mn is not None:
-            mask = mask | (df[var] < mn)
+            mask = mask | (series < mn)
         if mx is not None:
-            mask = mask | (df[var] > mx)
+            mask = mask | (series > mx)
         mask = mask.fillna(False)
         idxs = list(df.index[mask])
         if not idxs:
@@ -72,19 +82,22 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], vars_to_pl
         out_of_range_report[var] = display
 
     if remove and out_of_range_report:
-        mask_allowed = pd.Series(True, index=df.index)
+        # Collect all indices to remove
+        indices_to_remove = set()
         for var, items in out_of_range_report.items():
             for it in items:
                 if it["type"] == "single":
                     idx = it.get("index")
-                    if idx in mask_allowed.index:
-                        mask_allowed.at[idx] = False
+                    if idx is not None:
+                        indices_to_remove.add(idx)
                 else:
                     a = it.get("start_idx")
                     b = it.get("end_idx")
-                    if a is None or b is None:
-                        continue
-                    mask_allowed.loc[a:b] = False
+                    if a is not None and b is not None:
+                        indices_to_remove.update(range(a, b + 1))
+        
+        # Filter the dataframe by removing these indices
+        mask_allowed = ~df.index.isin(indices_to_remove)
         return df.loc[mask_allowed].reset_index(drop=True), out_of_range_report
 
     return df.copy(), out_of_range_report
