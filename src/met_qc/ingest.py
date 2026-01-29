@@ -48,7 +48,8 @@ def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optiona
             if not rid:
                 return False
             site_key = ''.join(c for c in cfg.site_id.upper() if c.isalnum())
-            if rid.site != site_key:
+            rid_site_key = ''.join(c for c in rid.site.upper() if c.isalnum())
+            if rid_site_key != site_key:
                 return False
             lf = cfg.filters.logger_file.upper()
             if f"{rid.level}_{rid.file}".upper() != lf:
