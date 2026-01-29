@@ -26,7 +26,12 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], vars_to_pl
     if not limits or df.empty:
         return df if remove else df.copy(), out_of_range_report
 
+    # Skip internal-use variables from min/max screening
+    skip_prefixes = ("G_SF_", "G_ISCAL_", "G_IU_", "D_SNOW_IU_")
+
     for var in vars_to_plot:
+        if var.startswith(skip_prefixes):
+            continue
         applicable = None
         for pattern, mn, mx in limits:
             if pattern.endswith("_"):
@@ -42,11 +47,13 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], vars_to_pl
         mn, mx = applicable
         if mn is None and mx is None:
             continue
+        # Coerce to numeric for comparisons; non-numeric become NaN and won't trigger
+        series = pd.to_numeric(df[var], errors="coerce")
         mask = pd.Series(False, index=df.index)
         if mn is not None:
-            mask = mask | (df[var] < mn)
+            mask = mask | (series < mn)
         if mx is not None:
-            mask = mask | (df[var] > mx)
+            mask = mask | (series > mx)
         mask = mask.fillna(False)
         idxs = list(df.index[mask])
         if not idxs:
@@ -72,20 +79,23 @@ def apply_var_min_max(df: pd.DataFrame, ts: str, limits: List[tuple], vars_to_pl
         out_of_range_report[var] = display
 
     if remove and out_of_range_report:
-        mask_allowed = pd.Series(True, index=df.index)
+        # Only clear values for the specific variable, keep other variables intact
+        df_filtered = df.copy()
         for var, items in out_of_range_report.items():
+            if var not in df_filtered.columns:
+                continue
             for it in items:
                 if it["type"] == "single":
                     idx = it.get("index")
-                    if idx in mask_allowed.index:
-                        mask_allowed.at[idx] = False
+                    if idx in df_filtered.index:
+                        df_filtered.at[idx, var] = pd.NA
                 else:
                     a = it.get("start_idx")
                     b = it.get("end_idx")
                     if a is None or b is None:
                         continue
-                    mask_allowed.loc[a:b] = False
-        return df.loc[mask_allowed].reset_index(drop=True), out_of_range_report
+                    df_filtered.loc[a:b, var] = pd.NA
+        return df_filtered, out_of_range_report
 
     return df.copy(), out_of_range_report
 

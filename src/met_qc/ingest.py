@@ -103,15 +103,101 @@ def ingest_and_merge(cfg: QCConfig, timeline: HeaderTimeline, date_from: Optiona
         merged = merged.sort_values(cfg.timestamp.column)
     if cfg.merge.drop_duplicates:
         merged = merged.drop_duplicates(subset=[cfg.timestamp.column], keep="first")
+    
+    # Load variable min/max limits from config/var_min_max.csv for filtering CSV outputs
+    limits = []
+    limits_path = Path("config") / "var_min_max.csv"
+    if limits_path.exists():
+        try:
+            lim_df = pd.read_csv(limits_path)
+            for _, row in lim_df.iterrows():
+                var = row.get("Variable")
+                mn = row.get("Min")
+                mx = row.get("Max")
+                mn = None if pd.isna(mn) else float(mn)
+                mx = None if pd.isna(mx) else float(mx)
+                if var:
+                    limits.append((var, mn, mx))
+        except Exception as e:
+            logger.warning(f"Failed to load var_min_max.csv: {e}")
+            limits = []
+    
+    # Helper function to apply filtering to a copy of the dataframe
+    def apply_filtering(df):
+        """Apply out-of-range filtering to a copy of the dataframe"""
+        df_filtered = df.copy()
+        data_cols = [col for col in df_filtered.columns if col != cfg.timestamp.column]
+        skip_prefixes = ("G_SF_", "G_ISCAL_", "G_IU_", "D_SNOW_IU_")
+        if limits:
+            for var in data_cols:
+                if var.startswith(skip_prefixes):
+                    continue
+                applicable = None
+                for pattern, mn, mx in limits:
+                    if pattern.endswith("_"):
+                        if var.upper().startswith(pattern.upper()):
+                            applicable = (mn, mx)
+                            break
+                    else:
+                        if var.upper() == pattern.upper():
+                            applicable = (mn, mx)
+                            break
+                if applicable:
+                    mn, mx = applicable
+                    series = pd.to_numeric(df_filtered[var], errors="coerce")
+                    if mn is not None:
+                        df_filtered.loc[series < mn, var] = pd.NA
+                    if mx is not None:
+                        df_filtered.loc[series > mx, var] = pd.NA
+        return df_filtered
+    
     # Write outputs
     cfg.output_path().mkdir(parents=True, exist_ok=True)
+    # Save unfiltered data to parquet for archival
     merged.to_parquet(str(cfg.output_path() / cfg.merge.output_parquet), index=False)
     if cfg.merge.output_csv:
-        merged.to_csv(str(cfg.output_path() / cfg.merge.output_csv), index=False)
+        # Apply filtering, replace NaN with -9999, and format timestamp
+        merged_output = apply_filtering(merged)
+        merged_output = merged_output.fillna(-9999)
+        if cfg.timestamp.column in merged_output.columns:
+            merged_output[cfg.timestamp.column] = pd.to_datetime(merged_output[cfg.timestamp.column]).dt.strftime('%Y%m%d%H%M')
+        merged_output.to_csv(str(cfg.output_path() / cfg.merge.output_csv), index=False)
     if cfg.merge.output_30min_csv:
         logger.info(f"Creating 30min CSV: {cfg.merge.output_30min_csv}")
         try:
-            merged_30min = merged.set_index(cfg.timestamp.column).resample('30min').mean().reset_index()
+            # Apply filtering first, then resample to 30min intervals
+            merged_filtered = apply_filtering(merged)
+            merged_30min = merged_filtered.set_index(cfg.timestamp.column).resample('30min', closed='left', label='left').mean().reset_index()
+            
+            # Create TIMESTAMP_START and TIMESTAMP_END columns
+            # TIMESTAMP_START is the beginning of the 30min period
+            # TIMESTAMP_END is the beginning of the next 30min period (00 or 30 minutes)
+            merged_30min['TIMESTAMP_START'] = pd.to_datetime(merged_30min[cfg.timestamp.column]).dt.strftime('%Y%m%d%H%M')
+            end_times = pd.to_datetime(merged_30min[cfg.timestamp.column]) + pd.Timedelta(minutes=30)
+            merged_30min['TIMESTAMP_END'] = end_times.dt.strftime('%Y%m%d%H%M')
+            
+            # Drop the original TIMESTAMP column
+            merged_30min = merged_30min.drop(columns=[cfg.timestamp.column])
+            
+            # Replace NaN with -9999
+            merged_30min = merged_30min.fillna(-9999)
+            
+            # Define standard column order (based on expected output format)
+            standard_order = [
+                'TIMESTAMP_START', 'TIMESTAMP_END',
+                'TA_1_1_1', 'RH_1_1_1', 'PA_2_1_1',
+                'SW_IN_1_1_1', 'SW_OUT_1_1_1', 'LW_IN_1_1_1', 'LW_OUT_1_1_1',
+                'PPFD_IN_1_1_1', 'PPFD_OUT_1_1_1',
+                'WS_2_1_1', 'WD_2_1_1', 'NDVI_1_1_1',
+                'TS_1_1_1', 'TS_2_1_1', 'TS_1_2_1', 'TS_1_3_1', 'TS_1_4_1', 'TS_1_5_1',
+                'D_SNOW_1_1_1'
+            ]
+            
+            # Reorder columns: standard order first, then any additional columns
+            ordered_cols = [col for col in standard_order if col in merged_30min.columns]
+            extra_cols = [col for col in merged_30min.columns if col not in standard_order]
+            merged_30min = merged_30min[ordered_cols + extra_cols]
+            
             logger.info(f"Saving 30min CSV with shape {merged_30min.shape}")
             merged_30min.to_csv(str(cfg.output_path() / cfg.merge.output_30min_csv), index=False)
         except Exception as e:

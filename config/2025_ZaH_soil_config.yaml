@@ -1,0 +1,43 @@
+site_id: "GL-ZaH"
+input_dir: "O:/Tech_ICOS/DATA/GL-ZaH/1.raw/Soil+snow/2025"
+header_dir: "config/headers"
+output_dir: "output"
+file_glob: "*.dat"
+
+filters:
+  logger_file: "L01_F02"
+
+timestamp:
+  column: "TIMESTAMP"
+  raw_format: "%Y%m%d%H%M%S"
+  timezone: "UTC"
+
+ingest:
+  has_header_row: false
+  nan_values: ["-9999", "-9999.0", "NA", "NaN", ""]
+  coerce_numeric: true
+
+merge:
+  sort_by_timestamp: true
+  drop_duplicates: true
+  output_parquet: "merged.parquet"
+  output_csv: "merged.csv"
+  output_30min_csv: "merged_30min.csv"
+
+plot:
+  resample: null
+  variables_include: []
+  output_html: "qc_overview.html"
+  include_missing_heatmap: true
+  include_file_coverage: true
+  plot_filter: true
+  output_files:
+    qc_raw.html: false
+    qc_30min.html: true
+    qc_daily.html: true
+
+# Persisted date range for 2025 run
+range:
+  year: "2025"
+  from: null
+  to: null
